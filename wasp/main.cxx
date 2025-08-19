@@ -36,7 +36,11 @@ SOFTWARE.
 
 HWND WND;
 HWND Button;
+
 HWND TrackBar;
+DWORD TrackBarCurrent;
+DWORD TrackBarMax;
+
 HWND StatusBar;
 CHAR StatusBarText[MAX_STATUS_BAR_TEXT_LENGTH] = DEFAULT_STATUS_BAR_TEXT;
 
@@ -67,11 +71,19 @@ VOID UpdateTrackBar() {
     if (IsAudioPresent(Audio)) {
         elapsed =
             Audio->nCurrentSample / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
-        UINT32 total =
+        total =
             Audio->lpWave->dwNumSamples / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
     }
 
-    // TODO update control
+    if (TrackBarMax != total) {
+        TrackBarMax = total;
+        SendMessageA(TrackBar, TBM_SETRANGEMAX, TRUE, TrackBarMax);
+    }
+
+    if (TrackBarCurrent != elapsed) {
+        TrackBarCurrent = elapsed;
+        SendMessageA(TrackBar, TBM_SETPOS, TRUE, TrackBarCurrent);
+    }
 }
 
 BOOL ActivatePlayback(WAVEPTR lpWav) {
@@ -81,6 +93,7 @@ BOOL ActivatePlayback(WAVEPTR lpWav) {
         return TRUE;
     }
 
+    EnableWindow(TrackBar, FALSE);
     ReleaseWave(lpWav);
 
     return FALSE;
@@ -92,7 +105,7 @@ VOID ResumePlayback() {
     strcpy(StatusBarText, DEFAULT_STATUS_BAR_TEXT);
     SendMessageA(StatusBar, SB_SETTEXT, (WPARAM)0, (LPARAM)StatusBarText);
 
-    EnableWindow(TrackBar, FALSE);
+    EnableWindow(TrackBar, TRUE);
     UpdateTrackBar();
 }
 
@@ -225,7 +238,7 @@ HWND CreateWaspTrackBar(HINSTANCE hInstance, HWND hWnd, int x, int y, int width,
     // https://learn.microsoft.com/en-us/windows/win32/controls/trackbar-control-styles
 
     return CreateWindowExA(0, TRACKBAR_CLASS, "",
-        WS_DISABLED | WS_TABSTOP | WS_CHILD | WS_VISIBLE,
+        WS_DISABLED | WS_TABSTOP | WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS,
         x, y, width, height,
         hWnd, NULL, hInstance, NULL);
 }
