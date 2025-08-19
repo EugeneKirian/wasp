@@ -21,6 +21,7 @@ SOFTWARE.
 */
 
 #include <windows.h>
+#include <windowsx.h>
 #include <commctrl.h>
 #include <strsafe.h>
 
@@ -39,7 +40,7 @@ HWND Button;
 
 HWND TrackBar;
 DWORD TrackBarCurrent;
-DWORD TrackBarMax;
+DWORD TrackBarMaximum;
 
 HWND StatusBar;
 CHAR StatusBarText[MAX_STATUS_BAR_TEXT_LENGTH] = DEFAULT_STATUS_BAR_TEXT;
@@ -66,9 +67,9 @@ VOID UpdateTrackBar() {
     CONST DWORD elapsed = GetAudioPosition(Audio);
     CONST DWORD total = GetAudioLength(Audio);
 
-    if (TrackBarMax != total) {
-        TrackBarMax = total;
-        SendMessageA(TrackBar, TBM_SETRANGEMAX, TRUE, TrackBarMax);
+    if (TrackBarMaximum != total) {
+        TrackBarMaximum = total;
+        SendMessageA(TrackBar, TBM_SETRANGEMAX, TRUE, TrackBarMaximum);
     }
 
     if (TrackBarCurrent != elapsed) {
@@ -197,6 +198,8 @@ LRESULT WINAPI WaspWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 HandleButtonClick();
             }
         }
+
+        break;
     case WM_HSCROLL:
         if (TrackBar == (HWND)lParam) {
             if (IsAudioPresent(Audio)) {
@@ -204,7 +207,11 @@ LRESULT WINAPI WaspWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 CONST DWORD position = action == TB_THUMBPOSITION || action == TB_THUMBTRACK
                     ? HIWORD(wParam) : (DWORD)SendMessageA(TrackBar, TBM_GETPOS, 0, 0);
 
-                SetAudioPosition(Audio, position);
+                if (position != GetAudioPosition(Audio)) {
+                    SetAudioPosition(Audio, position);
+                    UpdateTrackBar();
+                    UpdateStatusBar();
+                }
             }
 
             return 0;

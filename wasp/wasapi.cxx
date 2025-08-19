@@ -70,8 +70,11 @@ DWORD WINAPI AudioMain(LPVOID lpThreadParameter) {
 
         if (audio->dwState == AUDIOSTATE_IDLE || audio->dwState == AUDIOSTATE_PAUSE) {
             if (audio->dwState == AUDIOSTATE_IDLE) {
-                audio->nCurrentFrame = 0;
-                audio->nCurrentSample = 0;
+                WAVEPTR wav = audio->lpWave;
+                if (wav->dwNumFrames <= audio->nCurrentFrame) {
+                    audio->nCurrentFrame = 0;
+                    audio->nCurrentSample = 0;
+                }
             }
 
             WaitForSingleObject(audio->hSignal, INFINITE);
@@ -136,7 +139,8 @@ BOOL PlayAudio(AUDIOPTR lpAudio, WAVEPTR lpWav) {
     }
 
     // Activate new audio client.
-    if (FAILED(lpAudio->lpDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (LPVOID*)&lpAudio->lpAudioClient))) {
+    if (FAILED(lpAudio->lpDevice->Activate(__uuidof(IAudioClient),
+        CLSCTX_ALL, NULL, (LPVOID*)&lpAudio->lpAudioClient))) {
         return FALSE;
     }
 
@@ -260,12 +264,21 @@ VOID SetAudioPosition(AUDIOPTR lpAudio, DWORD dwSeconds) {
     if (!IsAudioPresent(lpAudio)) { return; }
 
     if (dwSeconds <= GetAudioLength(lpAudio)) {
-        // Calculate new frame and sample values for playback.
-        lpAudio->nCurrentSample =
-            dwSeconds * lpAudio->lpWave->wfxFormat.nSamplesPerSec;
-        lpAudio->nCurrentFrame = lpAudio->nCurrentSample / lpAudio->lpWave->wfxFormat.nChannels;
+        CONST BOOL play = IsAudioPlaying(lpAudio);
 
-        int kkk = 1;
+        // Pause playback to avoid audio artifacts.
+        if (play) { PauseAudio(lpAudio); }
+
+        // Calculate new frame and sample values for playback.
+        CONST UINT32 sample =
+            dwSeconds * lpAudio->lpWave->wfxFormat.nChannels * lpAudio->lpWave->wfxFormat.nSamplesPerSec;
+        CONST UINT32 frame = sample / lpAudio->lpWave->wfxFormat.nChannels;
+
+        lpAudio->nCurrentSample = sample;
+        lpAudio->nCurrentFrame = frame;
+
+        // Resume playback if it was paused.
+        if (play) { ResumeAudio(lpAudio); }
     }
 }
 
