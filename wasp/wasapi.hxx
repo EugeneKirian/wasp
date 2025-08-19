@@ -31,7 +31,7 @@ typedef enum AudioState {
     AUDIOSTATE_PLAY         = 1,            // Audio playback is active.
     AUDIOSTATE_PAUSE        = 2,            // Audio playback is on pause and can be unpaused.
     AUDIOSTATE_EXIT         = 3,
-    AUDIOSTATE_FORCE_DWORD = 0x7FFFFFFF
+    AUDIOSTATE_FORCE_DWORD  = 0x7FFFFFFF
 } AUDIOSTATE, * AUDIOSTATEPTR;
 
 typedef struct Audio {

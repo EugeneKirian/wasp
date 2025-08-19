@@ -42,7 +42,6 @@ DWORD WINAPI AudioMain(LPVOID lpThreadParameter) {
                 WAVEPTR wav = audio->lpWave;
 
                 CONST UINT32 frames =
-                    //min(target - padding, wav->dwNumSamples - audio->nCurrentSample);
                     min(target - padding, wav->dwNumFrames - audio->nCurrentFrame);
 
                 if (frames != 0) {
@@ -50,7 +49,7 @@ DWORD WINAPI AudioMain(LPVOID lpThreadParameter) {
                     if (SUCCEEDED(audio->lpAudioRenderer->GetBuffer(frames, &lock))) {
                         LPWAVEFORMATEX format = &wav->wfxFormat;
                         CONST size_t offset = audio->nCurrentFrame * format->nBlockAlign;
-                        LPVOID source = (LPVOID)((size_t)wav->lpSamples + offset);
+                        CONST LPVOID source = (LPVOID)((size_t)wav->lpSamples + offset);
 
                         CopyMemory(lock, source, frames * format->nBlockAlign);
 

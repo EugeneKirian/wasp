@@ -32,32 +32,30 @@ BOOL IsWaveFile(RIFFLIST* lpHeader) {
 }
 
 WAVEPTR OpenWave(LPCSTR lpszPath) {
-    HANDLE hFile = CreateFileA(lpszPath, GENERIC_READ, FILE_SHARE_READ, NULL,
+    HANDLE file = CreateFileA(lpszPath, GENERIC_READ, FILE_SHARE_READ, NULL,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 
-    if (hFile == INVALID_HANDLE_VALUE) {
-        return NULL;
-    }
+    if (file == INVALID_HANDLE_VALUE) { return NULL; }
 
-    DWORD dwFileSize = GetFileSize(hFile, NULL);
+    DWORD size = GetFileSize(file, NULL);
 
-    if (dwFileSize < MIN_WAVE_FILE_SIZE) {
-        CloseHandle(hFile);
+    if (size < MIN_WAVE_FILE_SIZE) {
+        CloseHandle(file);
         return NULL;
     }
 
     DWORD read = 0;
     BYTE bytes[MIN_WAVE_FILE_SIZE];
-    if (!ReadFile(hFile, bytes, MIN_WAVE_FILE_SIZE, &read, NULL)
+    if (!ReadFile(file, bytes, MIN_WAVE_FILE_SIZE, &read, NULL)
         || read != MIN_WAVE_FILE_SIZE || !IsWaveFile((RIFFLIST*)bytes)) {
-        CloseHandle(hFile);
+        CloseHandle(file);
         return NULL;
     }
 
     WAVEPTR wav = (WAVEPTR)AllocateMemory(sizeof(WAVE));
 
     if (wav == NULL) {
-        CloseHandle(hFile);
+        CloseHandle(file);
         return NULL;
     }
 
@@ -65,27 +63,27 @@ WAVEPTR OpenWave(LPCSTR lpszPath) {
 
     strcpy(wav->szPath, lpszPath);
 
-    LPVOID data = AllocateMemory(dwFileSize);
+    LPVOID data = AllocateMemory(size);
 
     if (data == NULL) {
         FreeMemory(wav);
-        CloseHandle(hFile);
+        CloseHandle(file);
         return NULL;
     }
 
-    SetFilePointer(hFile, 0, NULL, FILE_BEGIN);
+    SetFilePointer(file, 0, NULL, FILE_BEGIN);
 
-    if (!ReadFile(hFile, data, dwFileSize, &read, NULL) || read != dwFileSize) {
+    if (!ReadFile(file, data, size, &read, NULL) || read != size) {
         FreeMemory(wav);
         FreeMemory(data);
-        CloseHandle(hFile);
+        CloseHandle(file);
         return NULL;
     }
 
-    CloseHandle(hFile);
+    CloseHandle(file);
 
     BOOL found = FALSE;
-    LPVOID end = (LPVOID)((size_t)data + dwFileSize);
+    CONST LPVOID end = (LPVOID)((size_t)data + size);
 
     for (RIFFCHUNK* chunk = (RIFFCHUNK*)((size_t)data + sizeof(RIFFLIST));
         chunk < end; chunk = RIFFNEXT(chunk)) {
@@ -107,7 +105,6 @@ WAVEPTR OpenWave(LPCSTR lpszPath) {
         }
         // Search for data chunk. It must be present in a valid WAV file.
         else if (chunk->fcc == FCC('data')) {
-
             // Ensure that the format chunk preceeded the data chunk in the file.
             if (!found) { break; }
 
@@ -118,6 +115,8 @@ WAVEPTR OpenWave(LPCSTR lpszPath) {
             wav->dwNumFrames = chunk->cb / wav->wfxFormat.nBlockAlign;
             wav->dwNumSamples = chunk->cb / (wav->wfxFormat.wBitsPerSample >> 3);
 
+            // Allocate another buffer for audio sample data,
+            // so that only it is used going forward, and not the whole file content.
             wav->lpSamples = AllocateMemory(chunk->cb);
 
             if (wav->lpSamples != NULL) {
