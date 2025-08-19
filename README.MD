@@ -1,4 +1,4 @@
-#WASP
+# WASP
 
 WASP is a minimalistic WASAPI Wav Audio Player.
 
