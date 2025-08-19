@@ -191,7 +191,7 @@ LRESULT WINAPI WaspWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             DestroyWindow(hWnd);
             break;
         case ID_HELP_ABOUT:
-            // TODO
+            MessageBoxA(hWnd, "WASP 1.0.0.0\r\nEugene Kirian © 2025", WINDOW_NAME, MB_ICONINFORMATION);
             break;
         default:
             if (Button == (HWND)lParam) {
