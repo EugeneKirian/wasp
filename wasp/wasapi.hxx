@@ -22,21 +22,21 @@ SOFTWARE.
 
 #pragma once
 
-#include "wave.h"
+#include "wave.hxx"
 
 #include <mmdeviceapi.h>
 
 typedef enum AudioState {
-    AUDIOSTATE_IDLE = 0,
-    AUDIOSTATE_PLAY = 1,
-    AUDIOSTATE_PAUSE = 2,
-    AUDIOSTATE_EXIT = 3,
-    AUDIOSTATE_FORCE_DWORD = 0x7FFFFFFF  // TODO 
+    AUDIOSTATE_IDLE         = 0,            // Pending new audio track, or playback is completed.
+    AUDIOSTATE_PLAY         = 1,            // Audio playback is active.
+    AUDIOSTATE_PAUSE        = 2,            // Audio playback is on pause and can be unpaused.
+    AUDIOSTATE_EXIT         = 3,
+    AUDIOSTATE_FORCE_DWORD = 0x7FFFFFFF
 } AUDIOSTATE, * AUDIOSTATEPTR;
 
 typedef struct Audio {
     HANDLE                  hThread;
-    HANDLE                  hEvent; // TODO need to stop spinning when audio is complete
+    HANDLE                  hEvent;
 
     WAVEPTR                 lpWave;
     AUDIOSTATE              asState;
@@ -51,8 +51,15 @@ typedef struct Audio {
 } AUDIO, * AUDIOPTR;
 
 AUDIOPTR InitializeAudio();
+
 BOOL PlayAudio(AUDIOPTR lpAudio, WAVEPTR lpWav);
 VOID ResumeAudio(AUDIOPTR lpAudio);
 VOID PauseAudio(AUDIOPTR lpAudio);
 VOID StopAudio(AUDIOPTR lpAudio);
 VOID ReleaseAudio(AUDIOPTR lpAudio);
+
+BOOL IsAudioIdle(AUDIOPTR lpAudio);
+BOOL IsAudioPlaying(AUDIOPTR lpAudio);
+BOOL IsAudioPaused(AUDIOPTR lpAudio);
+
+BOOL IsAudioPresent(AUDIOPTR lpAudio);

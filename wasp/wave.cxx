@@ -20,8 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "mem.h"
-#include "wave.h"
+#include "mem.hxx"
+#include "wave.hxx"
 
 #include <aviriff.h>
 

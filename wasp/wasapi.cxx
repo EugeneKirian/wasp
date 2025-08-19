@@ -20,9 +20,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "mem.h"
-#include "wasapi.h"
-#include "wave.h"
+#include "mem.hxx"
+#include "wasapi.hxx"
+#include "wave.hxx"
 
 #define TARGET_BUFFER_PADDING_IN_SECONDS  (1.0f / 60.0f)
 
@@ -101,8 +101,6 @@ DWORD WINAPI AudioMain(LPVOID lpThreadParameter) {
 }
 
 AUDIOPTR InitializeAudio() {
-    if (FAILED(CoInitializeEx(NULL, COINIT_SPEED_OVER_MEMORY))) { return NULL; }
-
     AUDIOPTR audio = (AUDIOPTR)AllocateMemory(sizeof(AUDIO));
 
     if (audio == NULL) { return NULL; }
@@ -235,4 +233,28 @@ VOID ReleaseAudio(AUDIOPTR lpAudio) {
     lpAudio->lpDevice->Release();
     ReleaseWave(lpAudio->lpWave);
     FreeMemory(lpAudio);
+}
+
+BOOL IsAudioIdle(AUDIOPTR lpAudio) {
+    if (lpAudio == NULL) { return FALSE; }
+
+    return lpAudio->asState == AUDIOSTATE_IDLE;
+}
+
+BOOL IsAudioPlaying(AUDIOPTR lpAudio) {
+    if (lpAudio == NULL) { return FALSE; }
+
+    return lpAudio->asState == AUDIOSTATE_PLAY;
+}
+
+BOOL IsAudioPaused(AUDIOPTR lpAudio) {
+    if (lpAudio == NULL) { return FALSE; }
+
+    return lpAudio->asState == AUDIOSTATE_PAUSE;
+}
+
+BOOL IsAudioPresent(AUDIOPTR lpAudio) {
+    if (lpAudio == NULL) { return FALSE; }
+
+    return lpAudio->lpWave != NULL;
 }

@@ -24,24 +24,51 @@ SOFTWARE.
 #include <commctrl.h>
 #include <strsafe.h>
 
-#include "mem.h"
-#include "wasapi.h"
-#include "wasp.h"
+#include "mem.hxx"
+#include "wasapi.hxx"
+#include "wasp.hxx"
 
-#define WASP_WINDOW_NAME    "WASP"
+#define WINDOW_NAME                 "WASP"
+#define STATUS_BAR_ID               0
+
+#define MAX_STATUS_BAR_TEXT_LENGTH  128
+#define DEFAULT_STATUS_BAR_TEXT     "00:00:00 / 00:00:00"
 
 HWND WND;
 HWND Button;
 HWND TrackBar;
 HWND StatusBar;
+CHAR StatusBarText[MAX_STATUS_BAR_TEXT_LENGTH] = DEFAULT_STATUS_BAR_TEXT;
 
 AUDIOPTR Audio;
 
+BOOL ActivatePlayback(WAVEPTR lpWav) {
+    if (PlayAudio(Audio, lpWav)) {
+        EnableWindow(TrackBar, TRUE);
+        // TODO Reset trackbar
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+VOID DisablePlayback() {
+    StopAudio(Audio);
+
+    strcpy(StatusBarText, DEFAULT_STATUS_BAR_TEXT);
+    SendMessageA(StatusBar, SB_SETTEXT, (WPARAM)0, (LPARAM)StatusBarText);
+
+    EnableWindow(TrackBar, FALSE);
+    // TODO Reset trackbar
+}
+
 BOOL OpenWavFile(HWND hWnd) {
-    OPENFILENAMEA ofn;
     CHAR szFile[MAX_PATH];
     ZeroMemory(szFile, MAX_PATH);
+
+    OPENFILENAMEA ofn;
     ZeroMemory(&ofn, sizeof(OPENFILENAMEA));
+
     ofn.lStructSize = sizeof(OPENFILENAMEA);
     ofn.hwndOwner = hWnd;
     ofn.lpstrFile = szFile;
@@ -53,19 +80,19 @@ BOOL OpenWavFile(HWND hWnd) {
     ofn.lpstrInitialDir = NULL;
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
 
-    if (GetOpenFileNameA(&ofn))
-    {
-        if (Audio->lpWave != NULL) {
+    // Display file open dialog to the user.
+    if (GetOpenFileNameA(&ofn)) {
+        // If file was selected, check if it is different from the current file, if any,
+        // and if so - stop playback, so that there are resurces available for the new file.
+        if (IsAudioPresent(Audio)) {
             if (strcmp(Audio->lpWave->szPath, ofn.lpstrFile) != 0) {
-                StopAudio(Audio);
+                DisablePlayback();
             }
         }
 
-        WAVEPTR lpWav = OpenWave(ofn.lpstrFile);
-
-        if (lpWav != NULL) {
-            PlayAudio(Audio, lpWav);
-            return TRUE;
+        WAVEPTR wav = OpenWave(ofn.lpstrFile);
+        if (wav != NULL) {
+            return ActivatePlayback(wav);
         }
     }
 
@@ -88,21 +115,21 @@ LRESULT WINAPI WaspWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             DestroyWindow(hWnd);
             break;
         case ID_HELP_ABOUT:
+            // TODO
             break;
         default:
             if (Button == (HWND)lParam) {
-                if (Audio->lpWave == NULL) {
+                if (!IsAudioPresent(Audio)) {
                     OpenWavFile(hWnd);
                 }
-                else if (Audio->asState == AUDIOSTATE_IDLE
-                    || Audio->asState == AUDIOSTATE_PAUSE) { /* TODO */
-                    ResumeAudio(Audio);
+                else if (IsAudioPresent(Audio)) {
+                    if (IsAudioPlaying(Audio)) {
+                        PauseAudio(Audio);
+                    }
+                    else if (IsAudioPaused(Audio) || IsAudioIdle(Audio)) {
+                        ResumeAudio(Audio);
+                    }
                 }
-                else { PauseAudio(Audio); }
-
-                //Audio->asState =
-                //    (Audio->asState == AUDIOSTATE_IDLE || Audio->asState == AUDIOSTATE_PAUSE)
-                //    ? AUDIOSTATE_PLAY : AUDIOSTATE_PAUSE;
             }
         }
     }
@@ -121,14 +148,14 @@ HWND CreateWaspWindow(HINSTANCE hInstance) {
     wcls.hCursor = LoadCursorA(NULL, IDC_ARROW);
     wcls.hbrBackground = (HBRUSH)COLOR_WINDOW;
     wcls.lpszMenuName = (LPCSTR)MAKEINTRESOURCE(IDR_MENU1);
-    wcls.lpszClassName = WASP_WINDOW_NAME;
+    wcls.lpszClassName = WINDOW_NAME;
 
     const ATOM atom = RegisterClassA(&wcls);
 
     if (!atom) { return NULL; }
 
     return CreateWindowExA(WS_EX_ACCEPTFILES,
-        WASP_WINDOW_NAME, WASP_WINDOW_NAME,
+        WINDOW_NAME, WINDOW_NAME,
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT, 480, 160, NULL, NULL, hInstance, NULL);
 }
@@ -153,52 +180,62 @@ HWND CreateWaspButton(HINSTANCE hInstance, HWND hWnd, LPCSTR text, int x, int y,
     return button;
 }
 
+VOID UpdateStatusBar() {
+    CHAR text[MAX_STATUS_BAR_TEXT_LENGTH];
+
+    CONST UINT32 elapsed =
+        Audio->nCurrentSample / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
+    CONST UINT32 total =
+        Audio->lpWave->dwNumSamples / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
+
+    StringCchPrintfA(text, 128, "%02d:%02d:%02d / %02d:%02d:%02d",
+        elapsed / (60 * 60), (elapsed / 60) % 60, elapsed % 60,
+        total / (60 * 60), (total / 60) % 60, total % 60);
+
+    if (strcmp(StatusBarText, text) != 0) {
+        strcpy(StatusBarText, text);
+        SendMessageA(StatusBar, SB_SETTEXT, (WPARAM)0, (LPARAM)StatusBarText);
+    }
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
-    InitializeMemory();
-
-    Audio = InitializeAudio();
-
-    if (Audio == NULL) {
-        MessageBoxA(NULL, "Can't initialize WASAPI!", "WASP", MB_ICONERROR | MB_OK);
+    // Initialize.
+    if (FAILED(CoInitializeEx(NULL, COINIT_SPEED_OVER_MEMORY))) {
+        MessageBoxA(NULL, "Can't initialize COM!", WINDOW_NAME, MB_ICONERROR | MB_OK);
         return EXIT_FAILURE;
     }
 
+    InitializeMemory();
+    Audio = InitializeAudio();
+
+    if (Audio == NULL) {
+        MessageBoxA(NULL, "Can't initialize WASAPI!", WINDOW_NAME, MB_ICONERROR | MB_OK);
+        return EXIT_FAILURE;
+    }
+
+    // Initialize main window and controls.
     InitCommonControls();
 
     WND = CreateWaspWindow(hInstance);
 
     if (WND == NULL) {
-        MessageBoxA(NULL, "Can't create WASP window!", "WASP", MB_ICONERROR | MB_OK);
+        MessageBoxA(NULL, "Can't create WASP window!", WINDOW_NAME, MB_ICONERROR | MB_OK);
         return EXIT_FAILURE;
     }
 
     Button = CreateWaspButton(hInstance, WND, "", 0, 0, 75, 75);
     TrackBar = CreateWaspTrackBar(hInstance, WND, 75, 25, 380, 40);
+    StatusBar = CreateStatusWindowA(WS_CHILD | WS_VISIBLE, StatusBarText, WND, STATUS_BAR_ID);
 
-    //SendMessageA(TrackBar, TBM_SETRANGE,
-    //    (WPARAM)TRUE,                   // redraw flag 
-    //    (LPARAM)MAKELONG(7, 170));  // min. & max. positions
-
-    //SendMessageA(TrackBar, TBM_SETPAGESIZE,
-    //    0, (LPARAM)4);                  // new page size 
-
-    //SendMessageA(TrackBar, TBM_SETSEL,
-    //    (WPARAM)FALSE,                  // redraw flag 
-    //    (LPARAM)MAKELONG(7, 170));
-
-    //SendMessageA(TrackBar, TBM_SETPOS,
-    //    (WPARAM)TRUE,                   // redraw flag 
-    //    (LPARAM)7);
-
-    StatusBar = CreateStatusWindowA(WS_CHILD | WS_VISIBLE, "00:00:00 / 00:00:00", WND, 1 /* TODO*/);
+    // TODO handle command line arguments
 
     UpdateWindow(WND);
     ShowWindow(WND, nShowCmd);
 
+    // Main window event loop.
     BOOL active = TRUE;
-    MSG msg;
-
     while (active) {
+        MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
         {
             if (msg.message == WM_QUIT) { active = FALSE; }
@@ -207,30 +244,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             DispatchMessageA(&msg);
         }
 
-        if (!active) {
+        if (active) {
+            if (IsAudioPresent(Audio)) {
+                UpdateStatusBar();
+                // TODO update track bar
+            }
+
+            Sleep(1);
+        }
+        else {
             ReleaseAudio(Audio);
-            break;
         }
-
-        if (Audio != NULL && Audio->lpWave != NULL) {
-            //TODO
-            //TODO MAke pretty
-            // TODO make so it doesn't flicker
-            CHAR message[128];
-
-            CONST UINT32 elapsed =
-                Audio->nCurrentSample / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
-            CONST UINT32 total =
-                Audio->lpWave->dwNumSamples / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
-
-            StringCchPrintfA(message, 128, "%02d:%02d:%02d / %02d:%02d:%02d",
-                elapsed / (60 * 60), (elapsed / 60) % 60, elapsed % 60,
-                total / (60 * 60), (total / 60) % 60, total % 60);
-
-            SendMessageA(StatusBar, SB_SETTEXT, (WPARAM)0, (LPARAM)message);
-        }
-
-        Sleep(1);
     }
 
     CoUninitialize();
