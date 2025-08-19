@@ -49,10 +49,8 @@ AUDIOPTR Audio;
 VOID UpdateStatusBar() {
     CHAR text[MAX_STATUS_BAR_TEXT_LENGTH];
 
-    CONST UINT32 elapsed =
-        Audio->nCurrentSample / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
-    CONST UINT32 total =
-        Audio->lpWave->dwNumSamples / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
+    CONST DWORD elapsed = GetAudioPosition(Audio);
+    CONST DWORD total = GetAudioLength(Audio);
 
     StringCchPrintfA(text, 128, "%02d:%02d:%02d / %02d:%02d:%02d",
         elapsed / (60 * 60), (elapsed / 60) % 60, elapsed % 60,
@@ -65,15 +63,8 @@ VOID UpdateStatusBar() {
 }
 
 VOID UpdateTrackBar() {
-    UINT32 elapsed = 0;
-    UINT32 total = 0;
-
-    if (IsAudioPresent(Audio)) {
-        elapsed =
-            Audio->nCurrentSample / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
-        total =
-            Audio->lpWave->dwNumSamples / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
-    }
+    CONST DWORD elapsed = GetAudioPosition(Audio);
+    CONST DWORD total = GetAudioLength(Audio);
 
     if (TrackBarMax != total) {
         TrackBarMax = total;
@@ -206,6 +197,18 @@ LRESULT WINAPI WaspWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 HandleButtonClick();
             }
         }
+    case WM_HSCROLL:
+        if (TrackBar == (HWND)lParam) {
+            if (IsAudioPresent(Audio)) {
+                CONST DWORD action = LOWORD(wParam);
+                CONST DWORD position = action == TB_THUMBPOSITION || action == TB_THUMBTRACK
+                    ? HIWORD(wParam) : (DWORD)SendMessageA(TrackBar, TBM_GETPOS, 0, 0);
+
+                SetAudioPosition(Audio, position);
+            }
+
+            return 0;
+        }
     }
 
     return DefWindowProcA(hWnd, msg, wParam, lParam);
@@ -237,10 +240,16 @@ HWND CreateWaspWindow(HINSTANCE hInstance) {
 HWND CreateWaspTrackBar(HINSTANCE hInstance, HWND hWnd, int x, int y, int width, int height) {
     // https://learn.microsoft.com/en-us/windows/win32/controls/trackbar-control-styles
 
-    return CreateWindowExA(0, TRACKBAR_CLASS, "",
+    HWND track = CreateWindowExA(0, TRACKBAR_CLASS, "",
         WS_DISABLED | WS_TABSTOP | WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS,
         x, y, width, height,
         hWnd, NULL, hInstance, NULL);
+
+    if (track != NULL) {
+        SendMessageA(track, TBM_SETPAGESIZE, 0, 1);  
+    }
+
+    return track;
 }
 
 HWND CreateWaspButton(HINSTANCE hInstance, HWND hWnd, LPCSTR text, int x, int y, int width, int height) {

@@ -239,6 +239,36 @@ VOID ReleaseAudio(AUDIOPTR lpAudio) {
     FreeMemory(lpAudio);
 }
 
+DWORD GetAudioPosition(AUDIOPTR lpAudio) {
+    if (lpAudio == NULL) { return 0; }
+    if (!IsAudioPresent(lpAudio)) { return 0; }
+
+    return lpAudio->nCurrentSample
+        / (lpAudio->lpWave->wfxFormat.nChannels * lpAudio->lpWave->wfxFormat.nSamplesPerSec);
+}
+
+DWORD GetAudioLength(AUDIOPTR lpAudio) {
+    if (lpAudio == NULL) { return 0; }
+    if (!IsAudioPresent(lpAudio)) { return 0; }
+
+    return lpAudio->lpWave->dwNumSamples
+        / (lpAudio->lpWave->wfxFormat.nChannels * lpAudio->lpWave->wfxFormat.nSamplesPerSec);
+}
+
+VOID SetAudioPosition(AUDIOPTR lpAudio, DWORD dwSeconds) {
+    if (lpAudio == NULL) { return; }
+    if (!IsAudioPresent(lpAudio)) { return; }
+
+    if (dwSeconds <= GetAudioLength(lpAudio)) {
+        // Calculate new frame and sample values for playback.
+        lpAudio->nCurrentSample =
+            dwSeconds * lpAudio->lpWave->wfxFormat.nSamplesPerSec;
+        lpAudio->nCurrentFrame = lpAudio->nCurrentSample / lpAudio->lpWave->wfxFormat.nChannels;
+
+        int kkk = 1;
+    }
+}
+
 BOOL IsAudioIdle(AUDIOPTR lpAudio) {
     if (lpAudio == NULL) { return FALSE; }
 

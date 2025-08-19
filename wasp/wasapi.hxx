@@ -58,6 +58,10 @@ VOID PauseAudio(AUDIOPTR lpAudio);
 VOID StopAudio(AUDIOPTR lpAudio);
 VOID ReleaseAudio(AUDIOPTR lpAudio);
 
+DWORD GetAudioPosition(AUDIOPTR lpAudio);
+DWORD GetAudioLength(AUDIOPTR lpAudio);
+VOID SetAudioPosition(AUDIOPTR lpAudio, DWORD dwSeconds);
+
 BOOL IsAudioIdle(AUDIOPTR lpAudio);
 BOOL IsAudioPlaying(AUDIOPTR lpAudio);
 BOOL IsAudioPaused(AUDIOPTR lpAudio);
