@@ -34,8 +34,8 @@ DWORD WINAPI AudioMain(LPVOID lpThreadParameter) {
     CONST UINT32 target =
         (UINT32)(audio->nBufferSize * TARGET_BUFFER_PADDING_IN_SECONDS);
 
-    while (audio->asState != AUDIOSTATE_EXIT) {
-        if (audio->asState == AUDIOSTATE_PLAY) {
+    while (audio->dwState != AUDIOSTATE_EXIT) {
+        if (audio->dwState == AUDIOSTATE_PLAY) {
             UINT32 padding = 0;
 
             if (SUCCEEDED(audio->lpAudioClient->GetCurrentPadding(&padding))) {
@@ -60,7 +60,7 @@ DWORD WINAPI AudioMain(LPVOID lpThreadParameter) {
                         audio->lpAudioRenderer->ReleaseBuffer(frames, 0);
 
                         if (wav->dwNumFrames <= audio->nCurrentFrame) {
-                            audio->asState = AUDIOSTATE_IDLE;
+                            audio->dwState = AUDIOSTATE_IDLE;
                         }
                     }
                 }
@@ -69,24 +69,13 @@ DWORD WINAPI AudioMain(LPVOID lpThreadParameter) {
 
         Sleep(1);
 
-        if (audio->asState == AUDIOSTATE_IDLE || audio->asState == AUDIOSTATE_PAUSE) {
-            if (audio->asState == AUDIOSTATE_IDLE) {
-                //audio->nCurrentFrame = 0;
-                //audio->nCurrentSample = 0;
+        if (audio->dwState == AUDIOSTATE_IDLE || audio->dwState == AUDIOSTATE_PAUSE) {
+            if (audio->dwState == AUDIOSTATE_IDLE) {
+                audio->nCurrentFrame = 0;
+                audio->nCurrentSample = 0;
             }
 
-            //ResetEvent(audio->hEvent);
-
-            //if (WaitForSingleObject(audio->hEvent, INFINITE) != WAIT_OBJECT_0) {
-            //    audio->lpAudioClient->Stop();
-
-            //    SAFERELEASE(audio->lpAudioClient);
-            //    SAFERELEASE(audio->lpAudioRenderer);
-
-            //    CloseHandle(audio->hEvent);
-
-            //    return EXIT_FAILURE;
-            //}
+            WaitForSingleObject(audio->hSignal, INFINITE);
         }
     }
 
@@ -95,7 +84,7 @@ DWORD WINAPI AudioMain(LPVOID lpThreadParameter) {
     SAFERELEASE(audio->lpAudioClient);
     SAFERELEASE(audio->lpAudioRenderer);
 
-    CloseHandle(audio->hEvent);
+    CloseHandle(audio->hSignal);
 
     return EXIT_SUCCESS;
 }
@@ -122,19 +111,35 @@ AUDIOPTR InitializeAudio() {
 
     enumerator->Release();
 
-    if (FAILED(audio->lpDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (LPVOID*)&audio->lpAudioClient))) {
-        SAFERELEASE(audio->lpDevice);
-        FreeMemory(audio);
-        return NULL;
-    }
-
     return audio;
 }
 
 BOOL PlayAudio(AUDIOPTR lpAudio, WAVEPTR lpWav) {
     if (lpAudio == NULL || lpWav == NULL) { return FALSE; }
 
-    StopAudio(lpAudio);
+    // Stop current playback, if any, and release audio resources,
+    // so that they can be recreated to match new audio format.
+    {
+        StopAudio(lpAudio);
+
+        if (lpAudio->lpAudioClient != NULL) {
+            lpAudio->lpAudioClient->Stop();
+            lpAudio->lpAudioClient->Reset();
+
+            SAFERELEASE(lpAudio->lpAudioRenderer);
+            SAFERELEASE(lpAudio->lpAudioClient);
+        }
+
+        if (lpAudio->lpWave != NULL) {
+            ReleaseWave(lpAudio->lpWave);
+            lpAudio->lpWave = NULL;
+        }
+    }
+
+    // Activate new audio client.
+    if (FAILED(lpAudio->lpDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (LPVOID*)&lpAudio->lpAudioClient))) {
+        return FALSE;
+    }
 
     if (FAILED(lpAudio->lpAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
         AUDCLNT_STREAMFLAGS_RATEADJUST | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
@@ -160,19 +165,19 @@ BOOL PlayAudio(AUDIOPTR lpAudio, WAVEPTR lpWav) {
         return FALSE;
     }
 
-    lpAudio->hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+    lpAudio->hSignal = CreateEventA(NULL, TRUE, FALSE, NULL);
 
-    if (lpAudio->hEvent == NULL) {
+    if (lpAudio->hSignal == NULL) {
         SAFERELEASE(lpAudio->lpAudioRenderer);
         SAFERELEASE(lpAudio->lpAudioClient);
         return FALSE;
     }
 
-    lpAudio->asState = AUDIOSTATE_PLAY;
+    lpAudio->dwState = AUDIOSTATE_PLAY;
     lpAudio->hThread = CreateThread(NULL, 0, AudioMain, lpAudio, 0, NULL);
 
     if (lpAudio->hThread == NULL) {
-        CloseHandle(lpAudio->hEvent);
+        CloseHandle(lpAudio->hSignal);
         SAFERELEASE(lpAudio->lpAudioRenderer);
         SAFERELEASE(lpAudio->lpAudioClient);
         return FALSE;
@@ -185,52 +190,52 @@ BOOL PlayAudio(AUDIOPTR lpAudio, WAVEPTR lpWav) {
 
 VOID ResumeAudio(AUDIOPTR lpAudio) {
     if (lpAudio == NULL) { return; }
+    if (lpAudio->dwState == AUDIOSTATE_EXIT) { return; }
 
-    if (lpAudio->asState != AUDIOSTATE_PLAY) {
-        lpAudio->asState = AUDIOSTATE_PLAY;
+    if (lpAudio->dwState != AUDIOSTATE_PLAY) {
+        lpAudio->dwState = AUDIOSTATE_PLAY;
+        SetEvent(lpAudio->hSignal);
     }
 }
 
 VOID PauseAudio(AUDIOPTR lpAudio) {
     if (lpAudio == NULL) { return; }
+    if (lpAudio->dwState == AUDIOSTATE_EXIT) { return; }
 
-    if (lpAudio->asState != AUDIOSTATE_PAUSE) {
-        lpAudio->asState = AUDIOSTATE_PAUSE;
+    if (lpAudio->dwState != AUDIOSTATE_PAUSE) {
+        lpAudio->dwState = AUDIOSTATE_PAUSE;
     }
 }
 
 VOID StopAudio(AUDIOPTR lpAudio) {
     if (lpAudio == NULL) { return; }
+    if (lpAudio->dwState == AUDIOSTATE_EXIT) { return; }
 
-    if (lpAudio->asState != AUDIOSTATE_IDLE) {
-        lpAudio->asState = AUDIOSTATE_IDLE;
+    // Set state to Idle and rewind playback position to 0.
+    if (lpAudio->dwState != AUDIOSTATE_IDLE) {
+        lpAudio->dwState = AUDIOSTATE_IDLE;
         lpAudio->nCurrentFrame = 0;
         lpAudio->nCurrentSample = 0;
-    }
-
-    if (lpAudio->lpWave != NULL) {
-        ReleaseWave(lpAudio->lpWave);
-        lpAudio->lpWave = NULL;
     }
 }
 
 VOID ReleaseAudio(AUDIOPTR lpAudio) {
     if (lpAudio == NULL) { return; }
+    if (lpAudio->dwState == AUDIOSTATE_EXIT) { return; }
 
-    if (lpAudio->asState == AUDIOSTATE_IDLE) {
-        SetEvent(lpAudio->hEvent);
-    }
+    StopAudio(lpAudio);
 
-    lpAudio->asState = AUDIOSTATE_EXIT;
+    lpAudio->dwState = AUDIOSTATE_EXIT;
+    SetEvent(lpAudio->hSignal);
 
-    DWORD exit = 0;
+    DWORD exit = EXIT_SUCCESS;
     while (GetExitCodeThread(lpAudio->hThread, &exit)) {
         if (exit != STILL_ACTIVE) { break; }
 
         Sleep(1);
     }
 
-    lpAudio->lpDevice->Release();
+    SAFERELEASE(lpAudio->lpDevice);
     ReleaseWave(lpAudio->lpWave);
     FreeMemory(lpAudio);
 }
@@ -238,23 +243,24 @@ VOID ReleaseAudio(AUDIOPTR lpAudio) {
 BOOL IsAudioIdle(AUDIOPTR lpAudio) {
     if (lpAudio == NULL) { return FALSE; }
 
-    return lpAudio->asState == AUDIOSTATE_IDLE;
+    return IsAudioPresent(lpAudio) && lpAudio->dwState == AUDIOSTATE_IDLE;
 }
 
 BOOL IsAudioPlaying(AUDIOPTR lpAudio) {
     if (lpAudio == NULL) { return FALSE; }
 
-    return lpAudio->asState == AUDIOSTATE_PLAY;
+    return IsAudioPresent(lpAudio) && lpAudio->dwState == AUDIOSTATE_PLAY;
 }
 
 BOOL IsAudioPaused(AUDIOPTR lpAudio) {
     if (lpAudio == NULL) { return FALSE; }
 
-    return lpAudio->asState == AUDIOSTATE_PAUSE;
+    return IsAudioPresent(lpAudio) && lpAudio->dwState == AUDIOSTATE_PAUSE;
 }
 
 BOOL IsAudioPresent(AUDIOPTR lpAudio) {
     if (lpAudio == NULL) { return FALSE; }
+    if (lpAudio->dwState == AUDIOSTATE_EXIT) { return FALSE; }
 
     return lpAudio->lpWave != NULL;
 }

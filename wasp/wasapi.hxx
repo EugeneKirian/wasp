@@ -36,10 +36,10 @@ typedef enum AudioState {
 
 typedef struct Audio {
     HANDLE                  hThread;
-    HANDLE                  hEvent;
+    HANDLE                  hSignal;
 
     WAVEPTR                 lpWave;
-    AUDIOSTATE              asState;
+    AUDIOSTATE              dwState;
 
     IMMDevice*              lpDevice;
     IAudioClient*           lpAudioClient;

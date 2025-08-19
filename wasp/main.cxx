@@ -42,14 +42,58 @@ CHAR StatusBarText[MAX_STATUS_BAR_TEXT_LENGTH] = DEFAULT_STATUS_BAR_TEXT;
 
 AUDIOPTR Audio;
 
+VOID UpdateStatusBar() {
+    CHAR text[MAX_STATUS_BAR_TEXT_LENGTH];
+
+    CONST UINT32 elapsed =
+        Audio->nCurrentSample / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
+    CONST UINT32 total =
+        Audio->lpWave->dwNumSamples / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
+
+    StringCchPrintfA(text, 128, "%02d:%02d:%02d / %02d:%02d:%02d",
+        elapsed / (60 * 60), (elapsed / 60) % 60, elapsed % 60,
+        total / (60 * 60), (total / 60) % 60, total % 60);
+
+    if (strcmp(StatusBarText, text) != 0) {
+        strcpy(StatusBarText, text);
+        SendMessageA(StatusBar, SB_SETTEXT, (WPARAM)0, (LPARAM)StatusBarText);
+    }
+}
+
+VOID UpdateTrackBar() {
+    UINT32 elapsed = 0;
+    UINT32 total = 0;
+
+    if (IsAudioPresent(Audio)) {
+        elapsed =
+            Audio->nCurrentSample / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
+        UINT32 total =
+            Audio->lpWave->dwNumSamples / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
+    }
+
+    // TODO update control
+}
+
 BOOL ActivatePlayback(WAVEPTR lpWav) {
     if (PlayAudio(Audio, lpWav)) {
         EnableWindow(TrackBar, TRUE);
-        // TODO Reset trackbar
+        UpdateTrackBar();
         return TRUE;
     }
 
+    ReleaseWave(lpWav);
+
     return FALSE;
+}
+
+VOID ResumePlayback() {
+    ResumeAudio(Audio);
+
+    strcpy(StatusBarText, DEFAULT_STATUS_BAR_TEXT);
+    SendMessageA(StatusBar, SB_SETTEXT, (WPARAM)0, (LPARAM)StatusBarText);
+
+    EnableWindow(TrackBar, FALSE);
+    UpdateTrackBar();
 }
 
 VOID DisablePlayback() {
@@ -59,10 +103,33 @@ VOID DisablePlayback() {
     SendMessageA(StatusBar, SB_SETTEXT, (WPARAM)0, (LPARAM)StatusBarText);
 
     EnableWindow(TrackBar, FALSE);
-    // TODO Reset trackbar
+    UpdateTrackBar();
 }
 
-BOOL OpenWavFile(HWND hWnd) {
+VOID OpenFile(LPCSTR lpszPath) {
+    if (lpszPath == NULL) { return; }
+
+    // If file was selected, check if it is different from the current file, if any.
+    if (IsAudioPresent(Audio)) {
+        // Check if the selected file is the same as currently open file.
+        if (strcmp(Audio->lpWave->szPath, lpszPath) == 0) {
+            ResumePlayback();
+            return;
+        }
+
+        // Stop playback in case the new file is different from the current file.
+        DisablePlayback();
+    }
+
+    // Attempt to open a wav file.
+    WAVEPTR wav = OpenWave(lpszPath);
+    if (wav != NULL) {
+        // If the selected file is a valid wav file - play it immediately.
+        ActivatePlayback(wav);
+    }
+}
+
+VOID OpenFileDialog() {
     CHAR szFile[MAX_PATH];
     ZeroMemory(szFile, MAX_PATH);
 
@@ -70,7 +137,7 @@ BOOL OpenWavFile(HWND hWnd) {
     ZeroMemory(&ofn, sizeof(OPENFILENAMEA));
 
     ofn.lStructSize = sizeof(OPENFILENAMEA);
-    ofn.hwndOwner = hWnd;
+    ofn.hwndOwner = WND;
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrFilter = "Wave\0*.WAV\0All\0*.*\0";
@@ -80,23 +147,27 @@ BOOL OpenWavFile(HWND hWnd) {
     ofn.lpstrInitialDir = NULL;
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
 
-    // Display file open dialog to the user.
     if (GetOpenFileNameA(&ofn)) {
-        // If file was selected, check if it is different from the current file, if any,
-        // and if so - stop playback, so that there are resurces available for the new file.
-        if (IsAudioPresent(Audio)) {
-            if (strcmp(Audio->lpWave->szPath, ofn.lpstrFile) != 0) {
-                DisablePlayback();
-            }
-        }
-
-        WAVEPTR wav = OpenWave(ofn.lpstrFile);
-        if (wav != NULL) {
-            return ActivatePlayback(wav);
-        }
+        OpenFile(ofn.lpstrFile);
     }
+}
 
-    return FALSE;
+VOID HandleButtonClick() {
+    // If audio is already present, then switch between play/pause.
+    // In case audio ran to the end - resume audio from the start.
+    if (IsAudioPresent(Audio)) {
+        if (IsAudioPlaying(Audio)) {
+            PauseAudio(Audio);
+        }
+        else if (IsAudioPaused(Audio) || IsAudioIdle(Audio)) {
+            ResumeAudio(Audio);
+        }
+
+        return;
+    }
+    
+    // In case when audio is not present - offer user to open a wav file.
+    OpenFileDialog();
 }
 
 LRESULT WINAPI WaspWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -109,7 +180,7 @@ LRESULT WINAPI WaspWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case ID_FILE_OPEN:
-            OpenWavFile(hWnd);
+            OpenFileDialog();
             break;
         case ID_FILE_EXIT:
             DestroyWindow(hWnd);
@@ -119,17 +190,7 @@ LRESULT WINAPI WaspWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             break;
         default:
             if (Button == (HWND)lParam) {
-                if (!IsAudioPresent(Audio)) {
-                    OpenWavFile(hWnd);
-                }
-                else if (IsAudioPresent(Audio)) {
-                    if (IsAudioPlaying(Audio)) {
-                        PauseAudio(Audio);
-                    }
-                    else if (IsAudioPaused(Audio) || IsAudioIdle(Audio)) {
-                        ResumeAudio(Audio);
-                    }
-                }
+                HandleButtonClick();
             }
         }
     }
@@ -180,24 +241,6 @@ HWND CreateWaspButton(HINSTANCE hInstance, HWND hWnd, LPCSTR text, int x, int y,
     return button;
 }
 
-VOID UpdateStatusBar() {
-    CHAR text[MAX_STATUS_BAR_TEXT_LENGTH];
-
-    CONST UINT32 elapsed =
-        Audio->nCurrentSample / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
-    CONST UINT32 total =
-        Audio->lpWave->dwNumSamples / (Audio->lpWave->wfxFormat.nChannels * Audio->lpWave->wfxFormat.nSamplesPerSec);
-
-    StringCchPrintfA(text, 128, "%02d:%02d:%02d / %02d:%02d:%02d",
-        elapsed / (60 * 60), (elapsed / 60) % 60, elapsed % 60,
-        total / (60 * 60), (total / 60) % 60, total % 60);
-
-    if (strcmp(StatusBarText, text) != 0) {
-        strcpy(StatusBarText, text);
-        SendMessageA(StatusBar, SB_SETTEXT, (WPARAM)0, (LPARAM)StatusBarText);
-    }
-}
-
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     // Initialize.
     if (FAILED(CoInitializeEx(NULL, COINIT_SPEED_OVER_MEMORY))) {
@@ -210,6 +253,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     if (Audio == NULL) {
         MessageBoxA(NULL, "Can't initialize WASAPI!", WINDOW_NAME, MB_ICONERROR | MB_OK);
+        CoUninitialize();
         return EXIT_FAILURE;
     }
 
@@ -220,6 +264,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     if (WND == NULL) {
         MessageBoxA(NULL, "Can't create WASP window!", WINDOW_NAME, MB_ICONERROR | MB_OK);
+        CoUninitialize();
         return EXIT_FAILURE;
     }
 
@@ -227,34 +272,40 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     TrackBar = CreateWaspTrackBar(hInstance, WND, 75, 25, 380, 40);
     StatusBar = CreateStatusWindowA(WS_CHILD | WS_VISIBLE, StatusBarText, WND, STATUS_BAR_ID);
 
-    // TODO handle command line arguments
-
     UpdateWindow(WND);
     ShowWindow(WND, nShowCmd);
+
+    // Handle command line arguments as if it is a file path to a wave file.
+    if (*lpCmdLine != NULL) {
+        OpenFile(lpCmdLine);
+    }
 
     // Main window event loop.
     BOOL active = TRUE;
     while (active) {
         MSG msg;
-        while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
-        {
+        // Process all incoming window messages.
+        while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) { active = FALSE; }
 
             TranslateMessage(&msg);
             DispatchMessageA(&msg);
         }
 
+        // Update user interface to match current playback state.
         if (active) {
             if (IsAudioPresent(Audio)) {
                 UpdateStatusBar();
-                // TODO update track bar
+                UpdateTrackBar();
             }
 
             Sleep(1);
+
+            continue;
         }
-        else {
-            ReleaseAudio(Audio);
-        }
+
+        // Release audio resources properly before shutting down the app.
+        ReleaseAudio(Audio);
     }
 
     CoUninitialize();
